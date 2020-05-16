@@ -1,0 +1,4 @@
+{
+    "arch": "<flavor e.g. amd64>",
+    "imageName": "<container-registry>/<container-name>"
+}

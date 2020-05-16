@@ -1,0 +1,74 @@
+{
+    "name": "amp-service",
+    "version": "1.0.0",
+    "description": "Portal service for AMP client demo",
+    "main": "index.js",
+    "scripts": {
+        "test": "node ./node_modules/jest/bin/jest.js",
+        "tslint": "node ./node_modules/tslint/bin/tslint -p ./tsconfig.json",
+        "build": "node ./node_modules/typescript/bin/tsc -p .",
+        "dockerbuild": "node ./scripts/dockerBuild.js --docker-build",
+        "preversion": "npm test",
+        "version": "node ./scripts/dockerBuild.js --docker-build",
+        "postversion": "node ./scripts/dockerBuild.js --docker-push",
+        "postinstall": "node ./scripts/setupDevEnvironment.js"
+    },
+    "author": "sseiber",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git@github.com:sseiber/AMP-service.git"
+    },
+    "dependencies": {
+        "@azure/arm-mediaservices": "^7.1.0",
+        "@azure/cosmos": "^3.6.3",
+        "@azure/ms-rest-nodeauth": "^3.0.3",
+        "@hapi/bell": "^12.0.0",
+        "@hapi/boom": "^9.1.0",
+        "@hapi/cookie": "^11.0.1",
+        "@hapi/hapi": "^19.1.1",
+        "@hapi/inert": "^6.0.1",
+        "@hapi/nes": "^12.0.2",
+        "@hapi/wreck": "^17.0.0",
+        "fs-extra": "^9.0.0",
+        "hapi-auth-jwt2": "^10.1.0",
+        "jsonwebtoken": "^8.5.1",
+        "lodash.assign": "^4.2.0",
+        "lodash.get": "^4.4.2",
+        "lru-cache": "^5.1.1",
+        "nconf": "^0.10.0",
+        "oidc-token-hash": "^5.0.0",
+        "query-string": "^6.12.1",
+        "rsa-pem-from-mod-exp": "^0.8.4",
+        "spryly": "^2.0.8",
+        "uuid": "^7.0.3"
+    },
+    "devDependencies": {
+        "@types/azure": "^0.9.20",
+        "@types/hapi__hapi": "^19.0.3",
+        "@types/jest": "^25.2.1",
+        "@types/lru-cache": "^5.1.0",
+        "@types/nconf": "0.10.0",
+        "@types/node": "^13.13.4",
+        "jest": "^25.5.0",
+        "ts-jest": "^25.4.0",
+        "tslint": "^5.20.1",
+        "typescript": "^3.8.3"
+    },
+    "jest": {
+        "rootDir": "./src/",
+        "testRegex": "(/__tests__/.*|\\.(test|spec))\\.(ts|tsx)$",
+        "moduleFileExtensions": [
+            "ts",
+            "tsx",
+            "js",
+            "json"
+        ],
+        "transform": {
+            ".tsx?": "ts-jest"
+        },
+        "moduleNameMapper": {
+            "\\.(jpg|jpeg|png|gif|eot|otf|webp|svg|ttf|woff|woff2|mp4|webm|wav|mp3|m4a|aac|oga)$": "./__mocks__/fileMock.js"
+        }
+    }
+}
