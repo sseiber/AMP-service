@@ -1,6 +1,7 @@
 import { service, inject } from 'spryly';
 import { Server } from '@hapi/hapi';
 import { AmsCosmosDbService } from './amsCosmosDb';
+import { IAmsAccount } from '../models/amsAccount';
 import * as msRestNodeAuth from '@azure/ms-rest-nodeauth';
 import { AzureMediaServices } from '@azure/arm-mediaservices';
 import { v4 as uuidV4 } from 'uuid';
@@ -33,7 +34,9 @@ export class AmsService {
         });
     }
 
-    public async updateAmsAccountRegistration(userId: string, amsAccount: any): Promise<any> {
+    public async updateAmsAccountRegistration(userId: string, amsAccount: IAmsAccount): Promise<IAmsAccount[]> {
+        let accounts = [];
+
         try {
             const user = await this.getAmsUserById(userId);
             if (!user) {
@@ -42,34 +45,32 @@ export class AmsService {
                 throw new Error(`No user found with userid: ${userId}`);
             }
 
-            const querySpec = {
-                query: 'SELECT * FROM amsAccounts a WHERE a.iotcScopeId = @scopeId',
-                parameters: [{
-                    name: '@scopeId',
-                    value: amsAccount.iotcScopeId
-                }]
-            };
-
-            const account = await this.amsCosmosDb.accounts.getDocumentWithQuery(querySpec);
-
-            amsAccount.id = account ? account.id : uuidV4();
-
-            await this.amsCosmosDb.accounts.replaceDocument(amsAccount);
+            if (amsAccount.id) {
+                await this.amsCosmosDb.accounts.replaceDocument(amsAccount);
+            }
+            else {
+                amsAccount.id = uuidV4();
+                await this.amsCosmosDb.accounts.createDocument(amsAccount);
+            }
 
             if (!user.amsAccounts.includes(amsAccount.id)) {
                 user.amsAccounts.push(amsAccount.id);
 
                 await this.amsCosmosDb.users.replaceDocument(user);
             }
+
+            this.amsAccountCache.set(`${userId}:${amsAccount.amsAccountName}`, amsAccount);
+
+            accounts = await this.getAmsAccountsForUser(userId);
         }
         catch (ex) {
-            this.server.log(['AmsService', 'error'], `An error occurred while updating the AMS account for scopeId: ${amsAccount.iotcScopeId}`);
+            this.server.log(['AmsService', 'error'], `An error occurred while updating the AMS account for accountName: ${amsAccount.amsAccountName}`);
         }
 
-        return amsAccount;
+        return accounts;
     }
 
-    public async getAmsAccountsForUser(userId: string, scopeId?: string): Promise<any[]> {
+    public async getAmsAccountsForUser(userId: string, accountName?: string): Promise<IAmsAccount[]> {
         const accounts = [];
 
         try {
@@ -83,7 +84,7 @@ export class AmsService {
             for (const amsAccountId of user.amsAccounts) {
                 const account = await this.amsCosmosDb.accounts.getDocumentById(amsAccountId);
 
-                if (scopeId && amsAccountId === scopeId) {
+                if (accountName && account.accountName === accountName) {
                     return [account];
                 }
 
@@ -91,7 +92,7 @@ export class AmsService {
             }
         }
         catch (ex) {
-            this.server.log(['AmsService', 'error'], `An error occurred while accessing the account for scopeId: ${scopeId}`);
+            this.server.log(['AmsService', 'error'], `An error occurred while accessing the account for accountName: ${accountName || '[all accounts]'}`);
         }
 
         return accounts;
@@ -130,11 +131,11 @@ export class AmsService {
     }
 
     // @ts-ignore (startTime)
-    public async postCreateAmsStreamingLocator(userId: string, assetName: string, scopeId: string): Promise<any> {
+    public async postCreateAmsStreamingLocator(userId: string, accountName: string, assetName: string): Promise<any> {
         let createStreamingLocatorResponse = [];
 
         try {
-            const amsClientResponse = await this.ensureAmsClient(userId, scopeId);
+            const amsClientResponse = await this.ensureAmsClient(userId, accountName);
             if (!amsClientResponse) {
                 return createStreamingLocatorResponse;
             }
@@ -167,20 +168,20 @@ export class AmsService {
         return createStreamingLocatorResponse;
     }
 
-    private async ensureAmsClient(userId: string, scopeId: string): Promise<IAmsClientResponse> {
+    private async ensureAmsClient(userId: string, accountName: string): Promise<IAmsClientResponse> {
         this.server.log(['AmsService', 'info'], 'initialize');
 
         try {
-            let amsAccount = this.amsAccountCache.get(`${userId}:${scopeId}`);
+            let amsAccount = this.amsAccountCache.get(`${userId}:${accountName}`);
             if (!amsAccount) {
-                const amsAccounts = await this.getAmsAccountsForUser(userId, scopeId);
-                amsAccount = amsAccounts.find(item => item.scopeId === scopeId);
+                const amsAccounts = await this.getAmsAccountsForUser(userId, accountName);
+                amsAccount = amsAccounts.find(item => item.amsAccountName === accountName);
 
                 if (!amsAccount) {
                     return;
                 }
 
-                this.amsAccountCache.set(`${userId}:${scopeId}`, amsAccount);
+                this.amsAccountCache.set(`${userId}:${accountName}`, amsAccount);
             }
 
             const loginCredentials = await msRestNodeAuth.loginWithServicePrincipalSecret(

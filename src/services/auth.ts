@@ -77,7 +77,7 @@ export class AuthService {
             user = await this.ams.createAmsUser(profile, authProvider);
         }
 
-        const scope = user.amsAccounts.map(amsAccount => `user-${amsAccount.scopeId}`);
+        const scope = user.amsAccounts.map(amsAccount => `user-${amsAccount.accountName}`);
 
         this.setSessionScope(request, user.id, scope);
 

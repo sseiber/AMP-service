@@ -100,7 +100,7 @@ export class CosmosDbContainer {
             result = resource;
         }
         catch (ex) {
-            this.server.log(['CosmosDbContainer', 'error'], `createDocument: ${ex.message}`);
+            this.server.log(['CosmosDbContainer', 'error'], `replaceDocument: ${ex.message}`);
         }
 
         return result;

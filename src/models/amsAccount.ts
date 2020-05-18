@@ -5,7 +5,6 @@ import { extract } from '../utils';
 
 export interface IAmsAccount {
     id: string;
-    iotcScopeId: string;
     amsAadClientId: string;
     amsAadSecret: string;
     amsAadTenantId: string;
@@ -21,7 +20,6 @@ export interface IAmsAccount {
 export class DbAmsAccount extends CosmosDbContainer {
     public static extractAmsAccount = extract<IAmsAccount>({
         id: true,
-        iotcScopeId: true,
         amsAadClientId: true,
         amsAadSecret: true,
         amsAadTenantId: true,
