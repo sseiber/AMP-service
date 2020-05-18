@@ -6,7 +6,7 @@ ADD package.json ${WORKINGDIR}/package.json
 ADD tslint.json ${WORKINGDIR}/tslint.json
 ADD tsconfig.json ${WORKINGDIR}/tsconfig.json
 ADD src ${WORKINGDIR}/src
-ADD .npmrc ${WORKINGDIR}/.npmrc
+ADD static ${WORKINGDIR}/static
 
 RUN npm install -q && \
     ./node_modules/.bin/tsc -p . && \
@@ -14,9 +14,8 @@ RUN npm install -q && \
     npm prune --production && \
     rm -f tslint.json && \
     rm -f tsconfig.json && \
-    rm -f .npmrc && \
     rm -rf src
 
-EXPOSE 8084
+EXPOSE 8094
 
 ENTRYPOINT ["node", "./dist/index"]

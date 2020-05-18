@@ -22,7 +22,7 @@
             ],
             "env": {
                 "NODE_ENV": "local",
-                "PORT": "8084"
+                "PORT": "8094"
             },
             "runtimeArgs": [
                 "--preserve-symlinks"
