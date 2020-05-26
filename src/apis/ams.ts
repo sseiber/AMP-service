@@ -140,8 +140,42 @@ export class AmsRoutes extends RoutePlugin {
     }
 
     @route({
+        method: 'DELETE',
+        path: '/api/v1/ams/account/{accountId}',
+        options: {
+            auth: {
+                strategy: 'ams-session',
+                mode: 'required',
+                scope: ['api-client']
+            },
+            plugins: {
+                'hapi-auth-cookie': {
+                    redirectTo: false
+                }
+            },
+            tags: ['ams'],
+            description: 'Delete logged in user AMS account registration'
+        }
+    })
+    public async deleteUpdateAmsAccountRegistration(request: Request, h: ResponseToolkit) {
+        this.server.log(['AmsRoutes', 'info'], 'deleteUpdateAmsAccountRegistration');
+
+        const amsAccountId = request.params?.accountId;
+        if (!amsAccountId) {
+            throw boomUnauthorized('Missing accountId param');
+        }
+
+        const result = await this.ams.deleteAmsAccountRegistration((request.auth.credentials as any).userId, amsAccountId);
+        if (!result) {
+            throw boomBadRequest('An error occured while trying to delete the registered AMS account');
+        }
+
+        return h.response().code(204);
+    }
+
+    @route({
         method: 'POST',
-        path: '/api/v1/ams/streaminglocator',
+        path: '/api/v1/ams/account/{accountName}/streaminglocator',
         options: {
             auth: {
                 strategy: 'ams-session',
@@ -161,14 +195,14 @@ export class AmsRoutes extends RoutePlugin {
     public async postCreateAmsStreamingLocator(request: Request, h: ResponseToolkit) {
         this.server.log(['AmsRoutes', 'info'], 'postCreateAmsStreamingLocator');
 
-        const accountName = (request.payload as any)?.accountName;
+        const accountName = request.params?.accountName;
         const assetName = (request.payload as any)?.assetName;
         if (!assetName || !accountName) {
             throw boomBadRequest('Missing assetName or accountName parameters in payload');
         }
 
-        const streamingLocatorResponse = await this.ams.postCreateAmsStreamingLocator((request.auth.credentials as any).userId, accountName, assetName);
+        const amsResponse = await this.ams.postCreateAmsStreamingLocator((request.auth.credentials as any).userId, accountName, assetName);
 
-        return h.response(streamingLocatorResponse).code((!streamingLocatorResponse || streamingLocatorResponse.length === 0) ? 401 : 201);
+        return h.response(amsResponse).code((!Array.isArray(amsResponse.data) || amsResponse.data.length === 0) ? 401 : 201);
     }
 }

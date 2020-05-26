@@ -9,10 +9,16 @@ import * as LRUCache from 'lru-cache';
 
 const CacheItemSize = (36 * 3) + (7 * 256);
 
-interface IAmsClientResponse {
+interface IAmsRequestParams {
     amsClient: AzureMediaServices;
-    amsResourceGroup: string;
-    amsAccountName: string;
+    accountName: string;
+    resourceGroup: string;
+    assetName: string;
+}
+
+export interface IAmsResponse {
+    statusMessage: string;
+    data: any;
 }
 
 @service('ams')
@@ -68,6 +74,37 @@ export class AmsService {
         }
 
         return accounts;
+    }
+
+    public async deleteAmsAccountRegistration(userId: string, amsAccountId: string): Promise<boolean> {
+        let result = false;
+
+        try {
+            const user = await this.getAmsUserById(userId);
+            if (!user) {
+                this.server.log(['AmsService', 'info'], `No user found with userid: ${userId}`);
+
+                throw new Error(`No user found with userid: ${userId}`);
+            }
+
+            const amsAccount = await this.amsCosmosDb.accounts.getDocumentById(amsAccountId);
+            await this.amsCosmosDb.accounts.deleteDocument(amsAccountId);
+            this.amsAccountCache.del(`${userId}:${amsAccount.amsAccountName}`);
+
+            const amsAccountIndex = user.amsAccounts.indexOf(amsAccountId);
+            if (amsAccountIndex >= 0) {
+                user.amsAccounts.splice(amsAccountIndex, 1);
+
+                await this.amsCosmosDb.users.replaceDocument(user);
+            }
+
+            result = true;
+        }
+        catch (ex) {
+            this.server.log(['AmsService', 'error'], `An error occurred while deleting the AMS account`);
+        }
+
+        return result;
     }
 
     public async getAmsAccountsForUser(userId: string, accountName?: string): Promise<IAmsAccount[]> {
@@ -131,45 +168,57 @@ export class AmsService {
     }
 
     // @ts-ignore (startTime)
-    public async postCreateAmsStreamingLocator(userId: string, accountName: string, assetName: string): Promise<any> {
-        let createStreamingLocatorResponse = [];
+    public async postCreateAmsStreamingLocator(userId: string, accountName: string, assetName: string): Promise<IAmsResponse> {
+        let amsResponse = {
+            statusMessage: 'SUCCESS',
+            data: undefined
+        };
 
         try {
-            const amsClientResponse = await this.ensureAmsClient(userId, accountName);
-            if (!amsClientResponse) {
-                return createStreamingLocatorResponse;
+            amsResponse = await this.ensureAmsClient(userId, accountName);
+            if (amsResponse.statusMessage !== 'SUCCESS') {
+                return amsResponse;
             }
 
-            // const assetInfo = await amsClientResponse.amsClient.assets.get(this.amsResourceGroup, this.amsAccountName, assetName);
-            // streamingLocatorResponse.assetStartTime = assetInfo.created;
+            const amsRequestParams: IAmsRequestParams = {
+                amsClient: amsResponse.data.amsClient,
+                accountName: amsResponse.data.accountName,
+                resourceGroup: amsResponse.data.resourceGroup,
+                assetName
+            };
 
-            const listStreamingLocatorsResponse = await amsClientResponse.amsClient.assets.listStreamingLocators(amsClientResponse.amsResourceGroup, amsClientResponse.amsAccountName, assetName);
-            if (listStreamingLocatorsResponse?.streamingLocators.length > 0) {
-                createStreamingLocatorResponse = await this.getStreamingLocator(amsClientResponse, listStreamingLocatorsResponse.streamingLocators[0].name);
+            amsResponse = await this.listStreamingLocators(amsRequestParams);
+            if (amsResponse.statusMessage !== 'SUCCESS') {
+                return amsResponse;
+            }
+
+            if (amsResponse.data?.streamingLocators.length > 0) {
+                amsResponse = await this.getStreamingLocator(amsRequestParams, amsResponse.data.streamingLocators[0].name);
             }
             else {
-                const streamingLocatorCreateParams = {
-                    assetName,
-                    streamingPolicyName: 'Predefined_ClearStreamingOnly'
-                };
-                const locatorName = `locator_${uuidV4()}`;
-
-                const streamingLocatorsCreateResponse =
-                    await amsClientResponse.amsClient.streamingLocators.create(amsClientResponse.amsResourceGroup, amsClientResponse.amsAccountName, locatorName, streamingLocatorCreateParams);
-                if (streamingLocatorsCreateResponse) {
-                    createStreamingLocatorResponse = await this.getStreamingLocator(amsClientResponse, streamingLocatorsCreateResponse.name);
+                amsResponse = await this.createStreamingLocators(amsRequestParams);
+                if (amsResponse.statusMessage !== 'SUCCESS') {
+                    return amsResponse;
                 }
+
+                amsResponse = await this.getStreamingLocator(amsRequestParams, amsResponse.data.name);
             }
         }
         catch (ex) {
-            this.server.log(['AmsService', 'error'], `Error while creating streaming locator urls: ${ex.message}`);
+            this.server.log(['AmsService', 'error'], `Error while creating streaming locator: ${ex.message}`);
+            amsResponse.statusMessage = 'ERROR_UNKNOWN';
         }
 
-        return createStreamingLocatorResponse;
+        return amsResponse;
     }
 
-    private async ensureAmsClient(userId: string, accountName: string): Promise<IAmsClientResponse> {
+    private async ensureAmsClient(userId: string, accountName: string): Promise<IAmsResponse> {
         this.server.log(['AmsService', 'info'], 'initialize');
+
+        const amsResponse = {
+            statusMessage: 'SUCCESS',
+            data: {}
+        };
 
         try {
             let amsAccount = this.amsAccountCache.get(`${userId}:${accountName}`);
@@ -178,7 +227,8 @@ export class AmsService {
                 amsAccount = amsAccounts.find(item => item.amsAccountName === accountName);
 
                 if (!amsAccount) {
-                    return;
+                    amsResponse.statusMessage = 'ERROR_NO_AMS_ACCOUNT';
+                    return amsResponse;
                 }
 
                 this.amsAccountCache.set(`${userId}:${accountName}`, amsAccount);
@@ -197,27 +247,40 @@ export class AmsService {
 
             const amsClient = new AzureMediaServices(loginCredentials as any, amsAccount.amsSubscriptionId);
 
-            return {
+            amsResponse.data = {
                 amsClient,
-                amsResourceGroup: amsAccount.amsResourceGroup,
-                amsAccountName: amsAccount.amsAccountName
+                resourceGroup: amsAccount.amsResourceGroup,
+                accountName: amsAccount.amsAccountName
             };
         }
         catch (ex) {
             this.server.log(['AmsService', 'error'], `Error logging into AMS account: ${ex.message}`);
+
+            amsResponse.statusMessage = 'ERROR_UNKNOWN';
         }
+
+        return amsResponse;
     }
 
-    private async getStreamingLocator(amsClientResponse: IAmsClientResponse, streamingLocatorName: string): Promise<any> {
-        let streamingLocatorUrls = [];
+    private async getStreamingLocator(amsRequestParams: IAmsRequestParams, streamingLocatorName: string): Promise<IAmsResponse> {
+        const response: IAmsResponse = {
+            statusMessage: 'SUCCESS',
+            data: []
+        };
 
         try {
-            const streamingEndpoint = await amsClientResponse.amsClient.streamingEndpoints.get(amsClientResponse.amsResourceGroup, amsClientResponse.amsAccountName, 'default');
+            const streamingEndpoint = await amsRequestParams.amsClient.streamingEndpoints.get(
+                amsRequestParams.resourceGroup,
+                amsRequestParams.accountName,
+                'default');
 
             const streamingLocatorsListPathsResponse =
-                await amsClientResponse.amsClient.streamingLocators.listPaths(amsClientResponse.amsResourceGroup, amsClientResponse.amsAccountName, streamingLocatorName);
+                await amsRequestParams.amsClient.streamingLocators.listPaths(
+                    amsRequestParams.resourceGroup,
+                    amsRequestParams.accountName,
+                    streamingLocatorName);
 
-            streamingLocatorUrls = streamingLocatorsListPathsResponse.streamingPaths.map((streamingPath) => {
+            response.data = streamingLocatorsListPathsResponse.streamingPaths.map((streamingPath) => {
                 return {
                     protocol: streamingPath.streamingProtocol,
                     streamingLocatorUrl: `https://${streamingEndpoint.hostName}/${streamingPath.paths[0]}`
@@ -226,8 +289,53 @@ export class AmsService {
         }
         catch (ex) {
             this.server.log(['AmsService', 'error'], `Error getting listing streaming locator paths: ${ex.message}`);
+            response.statusMessage = 'ERROR_ACCESSING_STREAMING_LOCATOR';
         }
 
-        return streamingLocatorUrls;
+        return response;
+    }
+
+    private async listStreamingLocators(amsRequestParams: IAmsRequestParams): Promise<IAmsResponse> {
+        const response: IAmsResponse = {
+            statusMessage: 'SUCCESS',
+            data: {}
+        };
+
+        try {
+            response.data = await amsRequestParams.amsClient.assets.listStreamingLocators(
+                amsRequestParams.resourceGroup,
+                amsRequestParams.accountName,
+                amsRequestParams.assetName);
+        }
+        catch (ex) {
+            this.server.log(['AmsService', 'error'], `The specified asset (${amsRequestParams.assetName}) was not found: ${ex.message}`);
+            response.statusMessage = 'ERROR_ASSET_NOT_FOUND';
+        }
+
+        return response;
+    }
+
+    private async createStreamingLocators(amsRequestParams: IAmsRequestParams): Promise<IAmsResponse> {
+        const response: IAmsResponse = {
+            statusMessage: 'SUCCESS',
+            data: []
+        };
+
+        try {
+            response.data = await amsRequestParams.amsClient.streamingLocators.create(
+                amsRequestParams.resourceGroup,
+                amsRequestParams.accountName,
+                `locator_${uuidV4()}`,
+                {
+                    assetName: amsRequestParams.assetName,
+                    streamingPolicyName: 'Predefined_ClearStreamingOnly'
+                });
+        }
+        catch (ex) {
+            this.server.log(['AmsService', 'error'], `Error while creating streaming locator urls: ${ex.message}`);
+            response.statusMessage = 'ERROR_STREAMING_LOCATOR';
+        }
+
+        return response;
     }
 }
