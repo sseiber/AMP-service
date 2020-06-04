@@ -1,4 +1,4 @@
-FROM node:13
+FROM amd64/node:13-slim
 ENV WORKINGDIR /app
 WORKDIR ${WORKINGDIR}
 
